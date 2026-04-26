@@ -1,26 +1,28 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -48,6 +50,9 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
+uint32_t adcValues[3] = { 0, 0, 0 }; // Array to hold ADC values for 3 channels: ADC_CHANNEL_0, ADC_CHANNEL_1, ADC_CHANNEL_TEMPSENSOR
+uint32_t channelIndex = 0; // Index to track which channel's value is being updated in the adcValues array
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,12 +62,37 @@ static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+float analogToTemperature(unsigned int rawVal);
+float analogToVoltage(unsigned int rawVal);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+float analogToTemperature(unsigned int rawVal) {
+	// Convert raw ADC value from the internal temperature sensor into °C
+	// Formula:
+	//  - rawVal / 4095.0   → normalize 12-bit ADC (0..4095) to 0..1
+	//  - * 3.3             → convert to voltage (assuming Vref = 3.3V)
+	//  - - 0.76            → subtract voltage at 25 °C (typical = 0.76 V)
+	//  - / 0.0025          → divide by slope (2.5 mV/°C)
+	//  - + 25              → add reference temperature (25 °C)
+	return ((((rawVal / 4095.0) * 3.3) - 0.76) / 0.0025) + 25;
+}
 
+float analogToVoltage(unsigned int rawVal) {
+	// Convert the raw ADC value to voltage
+	// Assuming a 12-bit ADC with a reference voltage of 3.3V
+	return ((float) rawVal) * 3.3 / 4095;
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+	// This callback is called when an ADC conversion is complete
+	if (hadc->Instance == ADC1) {
+		// Read the converted value and store it in the adcValues array
+		adcValues[channelIndex] = HAL_ADC_GetValue(hadc);
+		channelIndex = (channelIndex + 1) % 3; // Move to the next channel index (0, 1, 2)
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -98,17 +128,25 @@ int main(void)
   MX_TIM2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+	HAL_TIM_Base_Start(&htim2);
+	HAL_ADC_Start_IT(&hadc1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+	while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
+		float pot0Voltage = analogToVoltage(adcValues[0]);
+		float pot1Voltage = analogToVoltage(adcValues[1]);
+		float temperature = analogToTemperature(adcValues[2]);
+
+		printf("po0t0Voltage: %.2f V, pot1Voltage: %.2f V, temperature: %.2f °C\r\n", pot0Voltage, pot1Voltage, temperature);
+		HAL_Delay(1000); // Delay for 1 second before printing values again
+
+	}
   /* USER CODE END 3 */
 }
 
@@ -179,7 +217,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE END ADC1_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
-  ADC_InjectionConfTypeDef sConfigInjected = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -193,8 +230,8 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 3;
   hadc1.Init.DMAContinuousRequests = DISABLE;
@@ -208,7 +245,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -227,40 +264,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
   sConfig.Rank = 3;
-  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configures for the selected ADC injected channel its corresponding rank in the sequencer and its sample time
-  */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_0;
-  sConfigInjected.InjectedRank = 1;
-  sConfigInjected.InjectedNbrOfConversion = 3;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_3CYCLES;
-  sConfigInjected.ExternalTrigInjecConvEdge = ADC_EXTERNALTRIGINJECCONVEDGE_RISING;
-  sConfigInjected.ExternalTrigInjecConv = ADC_EXTERNALTRIGINJECCONV_T2_TRGO;
-  sConfigInjected.AutoInjectedConv = DISABLE;
-  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
-  sConfigInjected.InjectedOffset = 0;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configures for the selected ADC injected channel its corresponding rank in the sequencer and its sample time
-  */
-  sConfigInjected.InjectedRank = 2;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configures for the selected ADC injected channel its corresponding rank in the sequencer and its sample time
-  */
-  sConfigInjected.InjectedRank = 3;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
   {
     Error_Handler();
   }
@@ -388,6 +392,10 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+int __io_putchar(int ch) {
+	ITM_SendChar(ch);
+	return 0;
+}
 
 /* USER CODE END 4 */
 
@@ -398,11 +406,10 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
