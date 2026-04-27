@@ -17,7 +17,7 @@ In STM32MX, under Pinout & Configuration:
 3. Set Clock Prescaler (optional, normally left as default)
 4. (optional set Resolution)
 5. Set "Scan Conversion Mode" to Enabled.
-6. In each "Rank" set the channel and sampling time (use the excel program to determine the max number of cyles).
+6. In each "Rank" set the channel and sampling time (use the excel program to determine the max number of cyles or use formulas below).
 
 <hr>
 
